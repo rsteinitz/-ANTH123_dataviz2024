@@ -490,8 +490,8 @@ Your figure should include:
 * one plot that represents non-spatial data (regression, boxplot, histogram, density or violin plot, columns, etc)
 * one map that includes data other than just coordinates (e.g., not just where all the cities in Japan are on map, but, say, their population size too)
 * a concise title
-* Easy to understand axis labels
-* a written figure caption
+* easy to understand axes labels
+* a figure caption (you can write this separately!)
 
 With the following parameters:
 * change the default ggplot colors
