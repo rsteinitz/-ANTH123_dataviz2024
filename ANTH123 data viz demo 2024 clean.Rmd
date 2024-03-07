@@ -1,0 +1,698 @@
+---
+title: "geospatial data viz demo"
+author: "Ronnie Bailey-Steinitz"
+date: "03/05/2024"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE, output.lines = 6}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = TRUE) #warning = FALSE, message = FALSE
+```
+
+## Welcome! 
+This tutorial 
+
+For more beginner-level examples, go to:
+https://r-spatial.org/r/2018/10/25/ggplot2-sf.html
+
+for more on the {sf} package:
+https://r-spatial.org/r/2017/01/12/newssf.html
+
+for more general R-spatial stuff: https://r-spatial.org/
+
+R has been used for the analysis of spatial data since the early days of R.
+
+### Attach packages
+```{r attach packages}
+
+# Wrangling
+library(tidyverse) # does everything
+library(plyr) # for some wrangling
+
+# Plotting
+library(RColorBrewer)
+library(patchwork)
+
+# Spatial
+library(ggmap) # package that can get coordinates of locations and retrieves map tiles from popular online mapping services like Google Maps
+library(spData) # small geographic data sets; some world data
+# To access larger datasets in this package, install the spDataLarge package with: `install.packages('spDataLarge', repos='https://nowosad.github.io/drat/', type='source')`
+library(sf) # create sf; extends data.frame-like objects with a simple feature list column
+library(tmap) # use this for mapping; # lots to install here, sorry, but it's worth it.
+# before installing tmap, do Tools --> Check for package updates and install all updates
+library(tmaptools) # use this for geocoding cities using OSM instead of Google (which requires API)
+
+```
+
+
+### Plotting like a pro
+#### Load some data
+More info on this dataset here (courtesy of the Smithsonian Inst. via TidyTuesday) https://github.com/rfordatascience/tidytuesday/tree/master/data/2020/2020-05-12
+--> you can look up what each column means; e.g., "tectonic_settings" means "Plate tectonic settings (subduction, intraplate, rift zone) + crust" 
+```{r}
+
+# reading in TidyTuesday data from website 
+volcano <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/volcano.csv')
+eruptions <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/eruptions.csv')
+events <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/events.csv')
+
+```
+
+#### Wrangle data
+```{r}
+
+# First, we want to become familiar with that data
+
+# -----let's look at the data-----
+head(volcano) # top ~6 rows + actual classes and values in first columns
+# note that this doesn't show you all columns. 
+# some of the classes we see: characters, dbls (numbers)
+     # get column headers 
+
+names(volcano) # quick way to see all column headers, but not easy to look for a specific one
+
+sort(names(world))  # alphabetical; if you're just looking for the title of a column; e.g., i want to see what population data there is, and i know the column names begin with "population_within_..."
+
+# you can also look at a complete list of all headers, plus some of the data in each columns
+glimpse(volcano) # tells you how many rows and columns you have too!
+
+# see entire dataset (like an excel sheet!)
+view(volcano)
+
+
+# -----some adjustments-----
+# ah, shoot- some numeric variables were read in as characters, bc of "unknown" entries... let's fix this
+volcano2 <- volcano %>% 
+  mutate(last_eruption = as.numeric(last_eruption_year)) # NAs introduced by coercion- this is fine, they put in NAs where the values was "unknown" bc this isn't a number
+
+hist(volcano2$last_eruption) # quick histogram of values in this column; this is helpful when you want to get a sense of the distribution of the data 
+
+
+# -----summarize the data-----
+# class(eruptions$start_year) # "numeric"
+erupt <- eruptions %>% 
+  group_by(volcano_name) %>% 
+  dplyr::summarize(
+    first_year = min(start_year),
+    last_year = max(end_year)
+  ) 
+
+view(erupt) # what did I get from this new, summarized dataset?
+# --> a range of years of activity! 
+
+```
+
+#### Let's try some plotting
+```{r}
+
+# but it looks like there are a lot of NAs for end year. Let's see how many
+# -----dealing with NAs-----
+sum(is.na(erupt$last_year)) # [1] 869
+# yikes! most of the volcanoes are still active! 
+# let's give them an end date of 2024
+
+test <- erupt %>% 
+  mutate(last_year = replace_na(last_year, 2024))
+
+sum(is.na(test$last_year)) # 0 # much better! 
+
+# --> go back to "erupt" and add replace_na() to pipe
+erupt <- erupt %>%  mutate(last_year = replace_na(last_year, 2024)) # added after I noticed all the NAs later
+
+
+
+# organize the data some more
+erupt2 <- erupt %>% 
+  mutate(years_active = last_year - first_year + 1)
+
+# let's have a look
+ggplot(erupt2) +
+  geom_segment(aes(x = first_year, y = volcano_name, xend = last_year, yend = volcano_name, color = years_active))
+
+# yikes! okay, select only some of these volcanoes 
+
+# -----filtering or sampling dataset-----
+erupt_short <- erupt2 %>% 
+  filter(last_year < 2024) %>% 
+  arrange(-years_active) %>% # rearrange the values by years active
+  slice(1:30)  # select first 30 rows (the ones with the highest range)
+  # sample_n(30) # select 30 random rows
+  
+ggplot(erupt_short) +
+  geom_segment(aes(x = first_year, y = volcano_name, xend = last_year, yend = volcano_name))
+
+# pretty cool! Let's see if we can order them by alphabet
+# -----arranging-----
+erupt_ordered <- erupt_short %>% 
+  arrange(volcano_name) # this is kinda funky and sometimes orders things counter-intuitively... you can you a "-" sign to reverse numeric values, but not categorical, I guess?
+
+# check:
+print(erupt_ordered$volcano_name) # yep! 
+
+# -----plotting-----
+ggplot(erupt_ordered) +
+  geom_segment(aes(x = first_year, y = volcano_name, xend = last_year, yend = volcano_name, color = years_active), size = 3) +
+  geom_vline(xintercept = 1980, color = "red", linetype = "dashed", linewidth = 1) +
+  #geom_text(aes(x = (first_year + 0.5*(years_active)), y = volcano_name, label = years_active)) +
+  geom_text(aes(x = 1300, y = volcano_name, label = years_active), size = 3) +
+  annotate(geom="text", x = 1820, y = 2, label="St. Helen's ->", color="red", size = 5) +
+  scale_y_discrete(limits = rev) +
+  # scale_color_distiller(palette = "PuRd", name = "Years Active", trans = "reverse") +
+  scale_color_gradientn(colours = c("green3", "deepskyblue4", "royalblue4", "darkorchid4"), name = "Years Active") +
+  theme_bw() +
+  theme(
+    panel.grid.minor.x = element_line(linetype = "dashed", color = "grey85"),
+    panel.grid.major.x = element_line(color = "grey80")
+    # ,
+    # panel.grid.major.y = element_line()
+  ) +
+  labs(x = "Years", 
+       y = "", 
+       title = "Volcano activity, ordered by name"
+       )
+   # xlim(1500, 2024)
+
+
+# you can also order a discrete axis by a continuous variable!
+# in this case, I made the y axis still volcano name, but I want them arranged by first year
+# so first, I re-arrange the dataset
+erupt_ordered_year <- erupt_short %>% 
+  arrange(first_year)
+
+# and then plot with special instructions in the aesthetics of geom_segment, and in scale_y_discrete
+ggplot(erupt_ordered_year) +
+  
+  geom_segment(aes(x = first_year, y = reorder(volcano_name, sort(first_year)), xend = last_year, yend = reorder(volcano_name, sort(first_year)), color = years_active), size = 3) +
+  
+  scale_y_discrete(limits = rev) +
+
+  # the stuff below is the same as before, except the plot title
+  # scale_color_distiller(palette = "PuRd") +
+  scale_color_gradientn(colours = c("green3", "deepskyblue4", "royalblue4", "darkorchid4"), name = "Years Active") +
+  geom_vline(xintercept = 1980, color = "red", linetype = "dashed", linewidth = 1) +
+  annotate(geom="text", x = 1800, y = 2, label="St. Helen's ->", color="red", size = 5) +
+  theme_bw() +
+  theme(
+    panel.grid.minor.x = element_line(linetype = "dashed", color = "grey85"),
+    panel.grid.major.x = element_line(color = "grey80")
+    # ,
+    # panel.grid.major.y = element_line()
+  ) +
+  labs(x = "Years", y = "", title = "Volcano activity, ordered by year")
+
+ggsave("Volcano_activity.png", height = 6, width = 6)
+```
+
+#### R colors
+```{r}
+
+knitr::include_graphics("https://www.datanovia.com/en/wp-content/uploads/dn-tutorials/ggplot2/figures/029-r-color-palettes-rcolorbrewer-palettes-colorblind-friendly-1.png") # Palettes
+
+knitr::include_graphics("https://derekogle.com/NCGraphing/img/colorbynames.png") # Specific colors
+
+```
+
+
+#### Joining datasets
+```{r}
+
+# join events data
+glimpse(events)
+
+# -----summarizing----
+names <- events %>% 
+  count("volcano_name") # what did this do? 
+# now we have a dataset with each volcano's number of eruptions
+
+# let's join datasets: adding the newly summarized 'number of eruptions' to the dataset
+vol_joined <- left_join(volcano2, names) %>% 
+  filter(!is.na(freq)) # reduced dataset from 958 to 677
+
+
+# what are some other neat variables here? 
+# we have latitude/longitute!
+
+ggplot(vol_joined, aes(x = longitude, y = latitude)) +
+  geom_point() +
+  geom_path() #yiiiiikes...
+
+# this doesn't really help me with plotting a map. These coordinates need to be told to act as coordinates, insteaa of numbers!
+
+vol_coords <- sf::st_as_sf(vol_joined, coords = c("longitude", "latitude"), 
+                 crs = 4326, agr = "constant") # this code might be helpful later! 
+
+ggplot(vol_coords) +
+  geom_sf()
+
+# congrats, you've plotted your first (kinda) map! It's missing a lot... we'll get there in a bit
+
+ggplot(vol_coords) +
+  geom_sf(aes(size = freq, color = freq)) +
+  scale_size(range = c(1, 10)) + # add guide = none after!
+  #scale_size(range = c(1, 10), guide = "none") + # add guide = none after!
+  theme_bw() +
+  scale_color_continuous()
+  
+
+# one more thing- let's find the most active volcano and add a notation to the plot!
+super_vol <- vol_coords %>% 
+  filter(freq == max(freq)) # oh cool, this is Mount Etna in Italy
+
+ggplot(vol_coords) +
+  geom_sf(aes(size = freq, color = freq)) +
+  geom_sf(data = super_vol, size = 4, color = "darkorange") +
+  scale_size(range = c(1, 10)) + # add guide = none after!
+  # scale_size(range = c(1, 10), guide = "none") + # add guide = none after!
+  theme_bw() +
+  scale_color_continuous()
+
+# some more cool formatting options
+ggplot() +
+  geom_sf(data = world, color = "grey80", fill = NA) +
+  geom_sf(data = vol_coords, aes(size = freq, color = freq)) +
+  geom_sf(data = super_vol, size = 5, color = "black") +
+  geom_sf(data = super_vol, size = 4, color = "cyan2") +
+  scale_size(range = c(1, 10), guide = "none") + # add guide = none after!
+  scale_color_distiller(palette = "YlOrRd") +
+  theme_dark() +
+  theme(
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "grey10", color = "orange", linewidth = 4),
+    plot.title = element_text(vjust = -10, hjust = 0.5, color = "cyan2")
+  ) +
+  labs(color = "Frequency", title = "Awesome volcano graph")
+  
+
+# ----ggplot as an object-----
+
+obj1 <- ggplot(vol_coords) +
+  geom_sf(aes(size = freq, color = freq)) +
+  geom_sf(aes(size = freq, color = freq)) +
+  # scale_size(range = c(1, 10)) + # add guide = none after!
+  scale_size(range = c(1, 10), guide = "none") + # add guide = none after!
+  scale_color_distiller(palette = "YlOrRd")
+ 
+obj1
+
+obj2 <- obj1 +
+  #includes everything in obj1, and...
+  theme_dark() +
+  theme(
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "grey10", color = "orange", linewidth = 4),
+    plot.title = element_text(vjust = -10, hjust = 0.5, color = "white")
+  ) +
+  labs(color = "Frequency", title = "Awesome volcano graph")
+
+obj2
+
+obj1 / obj2 #(this is patchwork, we'll touch on this in a bit!)
+
+ggsave("Comparing customizations.png")
+```
+
+#### Additional resources
+* R color palettes:
+https://r-graph-gallery.com/38-rcolorbrewers-palettes.html
+https://www.datanovia.com/en/blog/top-r-color-palettes-to-know-for-great-data-visualization/
+* R specific color names (e.g., "darkviolet"): https://derekogle.com/NCGraphing/resources/colors
+* Modifying components of a theme(): https://ggplot2.tidyverse.org/reference/theme.html
+* Color blindness accessibility: https://medium.com/version-1/simulating-visualisations-in-r-for-colour-blindness-2faddde63695
+* Adding text from data to figure (e.g., volcano name labels): https://r-charts.com/ggplot2/text-annotations/
+* Modifying point shapes: https://r-graphics.org/recipe-scatter-shapes
+
+--> Remember! Just because something looks cool and colorful to you doesn't mean it needs to be like that in scientific reports! Scientists prefer minimal and elegant <--
+
+
+
+#### Some really cool examples using this dataset with code! 
+* Christopher Yee: https://www.christopheryee.org/blog/tidytuesday-volcano-eruptions-python/ (uses python, but cool figure!)
+* Steven DiFalco: https://www.stevendifalco.com/post/2020-06-04/volcanos-tidytuesday-data/
+* Brenwin Ang and Joyce Lee: https://rpubs.com/Brenwin/volcanoes
+* Jake Kaupp: https://juliasilge.com/blog/multinomial-volcano-eruptions/
+* R for Biochemists: https://rforbiochemists.blogspot.com/2020/05/volcano-time-line-by-tidy-tuesday.html
+
+```{r}
+
+knitr::include_graphics("https://www.christopheryee.org/blog/2020-05-12-tidytuesday-volcano-eruptions-python_files/figure-html/unnamed-chunk-3-1.png") # Yee
+
+knitr::include_graphics("https://www.stevendifalco.com/post/2020-06-04/unnamed-chunk-3-1.png") # DiFalco
+
+knitr::include_graphics("https://www.stevendifalco.com/post/2020-06-04/volcanobyyear.gif") # animated using {gganimate}
+
+knitr::include_graphics("https://pbs.twimg.com/media/EYAWJv0WAAAJk_-.jpg:large") # Kaupp
+
+knitr::include_graphics("https://1.bp.blogspot.com/-MGaOWeoMOPU/Xr7T0og63qI/AAAAAAAACj4/rlu6O_TyItA4AxjkBazF80Hk21G9fONEgCLcBGAsYHQ/w1200-h630-p-k-no-nu/Screenshot%2B2020-05-15%2B18.39.04.png") # R for Biochemists
+
+```
+
+#### The official R Graph Gallery
+https://r-graph-gallery.com/index.html 
+Showcases different plot types for different data viz needs
+
+
+### Spatial Data - Intro
+You can find some great tutorials here: https://bookdown.org/rdpeng/RProgDA/mapping.html
+
+#### Load some basic data
+```{r CRS Info}
+
+# Read in vector data from spData package
+data("world")
+
+# Check the class of the object
+class(world) #sf or 'simple feature' object; we don't need to transform the spatial/coordinate data to spatial
+#Simple features are a standard for the exchange of spatial feature data, meaning points, lines and polygons (and not e.g. vector topology, networks, or rasters). 
+
+# Check the CRS of the data using st_crs() command
+st_crs(world)
+
+# Take a peak into the data set:
+head(world) # top ~6 rows + actual classes and values in column
+
+# some of the classes we see: characters, dbls (numbers), and multipolygon (geometric shape that consists of multiple connected polygons)... we'll touch on that in a bit
+     
+# get column headers 
+names(world) # quick way to check the spelling of column names, for example
+sort(names(world)) # same as above, but sort the list of *the names* of the columns by alphabetical order (does not change structure of the dataset)
+
+```
+
+In the `world` dataset the `head()` command returns the "simple feature dialogue"; it tells you what kind of "geometry" you are dealing with, the Geodetic CRS, and how many "fields" or attributes you have linked to each polygon.
+
+Now let's do a quick visualization:
+#### Quick Viz
+```{r world plot}
+
+# The default plot of an sf object is a multi-plot of all attributes, up to a reasonable maximum:
+plot(world)
+# so this takes that column of multipolygons, and says, ok- I know what the geographic outline is of each country or 
+
+# what are the headers of each of the plots?
+names(world)
+
+# can we plot just one column?
+# plot(world$continent)
+
+# I guess not... 
+# ...why? because the `geometry` column is the key feature here! The tidyverse world works well with `sf` in that it "sticks" the geometry column to whatever it is you subset by, however just calling with the dollar sign cut's out the geometry column, so it doesn't know how to plot it.
+
+# but we can choose which column to plot by indexing, which maintains the association with the 'sticky geometry':
+world %>% 
+  select(continent) %>% 
+  plot()
+
+# how does R know the shapes of continents if I only selected continent name?
+test <- world %>% 
+  select(continent) 
+
+plot(test)
+
+```
+
+#### ggplot
+ggplot has theme presets that give your plots different set appearances (which can also be further modified). More info here: https://ggplot2-book.org/themes
+```{r}
+
+# Now with ggplot, for ease of formatting!
+ggplot(data = world) +
+    geom_sf() +
+    ggtitle("World Countries") 
+
+# and then modify things!
+# to add more context, let's color by country
+ggplot(data = world) +
+  geom_sf(aes(fill = name_long)) +
+  theme(
+    legend.position = "none",
+    panel.background = element_rect(fill = "lightblue")
+  ) +
+   ggtitle("World Countries") +
+   labs(fill = "Continents")
+
+# or by continent! 
+ggplot(data = world) +
+  geom_sf(aes(fill = continent)) +
+  theme(
+    legend.position = "none",
+    panel.background = element_rect(fill = "lightblue")
+  ) +
+  ggtitle("World Continents") +
+  labs(fill = "Continents")
+
+
+# you can also fill by continuous data
+ggplot(data = world) +
+    geom_sf(aes(fill = area_km2)) + # fills each country (smallest unqiue value) by its area in Km^2
+    geom_sf(data = vol_coords, color = "darkorange") + # data from earlier!
+    theme_bw() +
+    labs(fill = bquote('Area in '(Km^2))) + # bquote is a base function that lets you use use mathematical expressions in titles
+    ggtitle("World countries by area")
+
+
+map1 <- ggplot(data = world) +
+    geom_sf(aes(fill = area_km2)) + # fills each country (smallest unqiue value) by its area in Km^2
+    geom_sf(data = vol_coords, color = "darkorange") + # data from earlier!
+    theme_bw() +
+    labs(fill = bquote('Area in '(Km^2))) + # bquote is a base function that lets you use use mathematical expressions in titles
+    ggtitle("World countries by area")
+
+
+# you can even re-project on the fly while plotting:
+map1 + coord_sf(crs = "+proj=laea +lat_0=52 +lon_0=10 +ellps=GRS80 +units=m") +
+  ggtitle("World countries, but make it round")
+    
+
+# The function coord_sf allows to deal with the coordinate system, which includes both projection and extent of the map. By default, the map will use the coordinate system of the first layer that defines one (i.e. scanned in the order provided), or if none, fall back on WGS84 (latitude/longitude, the reference system used in GPS). Using the argument crs, it is possible to override this setting, and project on the fly to any projection. This can be achieved using any valid PROJ4 string (here, the European-centric ETRS89 Lambert Azimuthal Equal-Area projection)
+```
+
+
+#### Selecting spatial data and patchwork
+```{r}
+
+# Assuming Antarctica is part of the dataset and you want to remove it
+world_filtered <- world[world$continent != "Antarctica", ]
+# see that now dataset has 176 rows instead of 177
+
+notfiltered <- ggplot(data = world) +
+  geom_sf(aes(fill = continent)) +
+  #theme_bw() +
+  coord_sf(expand = FALSE) + # this is a product of spatial plotting... just define your y-axis
+  #scale_y_continuous(limits = c(-80, 80)) +
+  ggtitle("World Continents") +
+  labs(fill = "Continents")
+
+notfiltered
+
+
+filtered <- ggplot(data = world_filtered) +
+  geom_sf(aes(fill = continent)) +
+  #theme_bw() +
+  coord_sf(expand = FALSE) +
+  #scale_y_continuous(limits = c(-80, 80)) +
+  ggtitle("World Continents - filtered") +
+  labs(fill = "Continents") +
+  theme(legend.position = "none") # removing legend so that it doesn't appear twice
+
+filtered
+
+
+# using patchwork to plot together
+(notfiltered / filtered) + plot_layout(guides = "collect") # see what happens to the legend when you delete "plot_layout()"
+
+
+# let's make a quick regression plot
+reg <- ggplot(world, aes(x = log(pop), y = log(area_km2))) +
+  geom_point(aes(color = continent)) +
+  geom_smooth(method = "lm") +
+  # xlim(0, 100000000) +
+  # ylim(0, 1000000) +
+  theme_bw() +
+  scale_color_brewer(palette="Dark2") +
+  labs(x = "Population", y = bquote('Area '(Km^2)))
+
+reg
+# ======================================
+# Now, compiled plots!
+
+# we use the package {patchwork} to compile multiple figures into composite plots
+  # use intuitive, "algebra-like" structure to group or organize
+  # use "+" or "|" for side by side placement
+  # and "/" for one panel above another
+  # use ( ) to group plots together into a panel; e.g., (A + B) / C
+  # use plot_spacer() as a placeholder, an easy way to fill empty spots to help construct your final plot
+
+notfiltered + filtered
+notfiltered / filtered
+((notfiltered + filtered) + plot_layout(guides = "collect")) / reg
+#((notfiltered / filtered) + plot_layout(guides = "collect")) / reg
+
+((notfiltered + filtered) + plot_layout(guides = "collect")) / 
+  (reg + plot_spacer())
+
+# plot_spacer() helps as a placeholder for constructing your combined plots
+
+((reg + plot_spacer() + reg) / 
+  (plot_spacer() + reg + plot_spacer())) + plot_layout(guides = "collect")
+ 
+# yikes, let's get rid of the legends
+reg2 <- reg + theme(legend.position = "none") # and you can add some ggplot mods that will apply to all of the plots!
+
+# and let's try again
+(reg2 + plot_spacer() + reg2) / 
+  (plot_spacer() + reg2 + plot_spacer())
+
+
+```
+
+#### Selecting spatial data
+```{r}
+
+# I want to only include the U.S. but is it called U.S.? United States? United States of America?
+# let's check what the entries are
+world$name_long # ah! this is a messy list...
+sort(world$name_long) # note that this doesn't actually save the dataset columns in the sorted order- just returns a list of the columns headers, that it then sorts and spits out to you in order
+
+# now we can select the U.S. polygon only, using indexing
+us <- world %>% 
+  filter(name_long == "United States")
+  # filter(continent == "Europe")
+
+# view(us) # woot! 
+
+ggplot(data = us) +
+  # geom_sf() +
+  # geom_sf(color = "skyblue4") +
+  geom_sf(color = "saddlebrown", fill = "tan1", linewidth = 0.8) +
+  theme_bw() +
+  #coord_sf(expand = FALSE) +
+  #scale_y_continuous(limits = c(-80, 80)) +
+  ggtitle("United States") +
+  theme(legend.position = "none")
+
+
+```
+
+
+#### Geocoding
+You can use existing search engines to look for addresses. You used to be able to do this with a package that tapped Google searchers, but Google now requires an API (a developer key) to allow these searchers... it's a process... Instead, we'll use a package that queries from Open Street Map (OSM).
+read more here: https://rdrr.io/cran/tmaptools/man/geocode_OSM.html
+```{r}
+
+# let's look at some cities
+cities <- tibble(city = c("London", "New York", "Santa Barbara"))
+
+# and now let's ask for their coordinates
+geocities <- geocode_OSM(cities$city)
+
+
+
+# you can also use this to code a specific address! 
+address <- geocode_OSM("522 University Dr, Santa Barbara, CA, 93106") 
+
+# class(address) # [1] "list
+# hmm... this doesn't help me... 
+
+
+address <- geocode_OSM("522 University Dr, Santa Barbara, CA, 93106", as.data.frame = T) 
+class(address$coords) # these coordinates are not actually geocoded- they are numbers
+
+address <- geocode_OSM("522 University Dr, Santa Barbara, CA, 93106", as.data.frame = T) %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) # remember to always give longitutde first (x), then latitude (y)
+
+# does this plot as a map?
+ggplot(data = address) +
+  #geom_sf(data = world) +
+  geom_sf(color = "darkred", size = 6) +
+  geom_sf(color = "red", size = 4) # not quite... need to add a world map to give it some contex
+
+ggplot(data = address) +
+  geom_sf(data = world) +
+  geom_sf(color = "darkred", size = 6) +
+  geom_sf(color = "red", size = 4) +
+  geom_sf(data = vol_coords, color = "darkorange") # data from earlier!
+
+# you can then limit the axes to zoom in to the region of interest
+
+```
+
+Zooming in onto region of interest (accounting for CRS): https://datascience.blog.wzb.eu/2019/04/30/zooming-in-on-maps-with-sf-and-ggplot2/
+
+
+
+### Your Exercise:
+Produce a combined figure using the volcanos, eruptions, and/or events dataset (one, two, or all three)
+
+Your figure should include:
+* one plot that represents non-spatial data (regression, boxplot, histogram, density or violin plot, columns, etc)
+* one map that includes data other than just coordinates (e.g., not just where all the cities in Japan are on map, but, say, their population size too)
+* a concise title
+* Easy to understand axis labels
+* a written figure caption
+
+With the following parameters:
+* change the default ggplot colors
+* change the default ggplot theme (themes are plot appearances: background and text colors)
+* combine multiple plots using patchwork
+
+Something to consider: what is the story you want to tell? 
+* why are you joining these figures? do the different panels of the plot correspond to one another? 
+* how does order of plots help your narrative?
+* how are your color choices, axis limits, titles, and other parameters helping you tell your story?
+
+
+
+### BONUS
+#### tmap (interactive!)
+tmap is specifically designed for thematic maps and works very intuitively with sf objects. To create a simple world map:
+
+Cool stuff with tmaps:
+https://cran.r-project.org/web/packages/tmap/vignettes/tmap-getstarted.html
+
+```{r}
+
+tm_shape(world) +
+  tm_borders() +
+  tm_layout(title = "World Map") # use this like ggplot's "theme()"
+
+# and with tmap
+tm_shape(world) +
+  tm_polygons("continent") +
+  tm_layout(title = "World map, in color")
+
+# this is much closer to a publication-ready map
+# The tmap package makes it easy to visualize sf objects in R. It’s far more elegant than the other options I’ve shown you and makes creating interactive maps very simple.
+
+tm_shape(world) +
+  tm_polygons("continent") +
+  tm_layout(title = "World Map",
+            title.position = c("left", "top"),
+            # legend.position = c("left", "bottom") # LB is default; # "right", "center", "left" and "top", "bottom"
+            # legend.outside = TRUE,
+            # legend.outside.position = "bottom"
+            ) 
+
+# continuous color scale
+tm_shape(world) +
+  tm_polygons("lifeExp")
+
+
+# and you can switch to an interactive version!!!
+tmap_mode("view")
+
+tm_shape(world) +
+  tm_polygons("lifeExp", alpha = 0.7, palette = "-Spectral") 
+# +
+  # tm_polygons(alpha = 0.7) +
+  # tm_bubbles("pop", size = "pop")
+    
+# **tmaps are also interactive in knitted documents**
+# to return to regular plotting for publications:
+tmap_mode("plot")
+
+tm_shape(world) +
+  tm_polygons("lifeExp", alpha = 0.7, palette = "-Spectral") 
+
+```
