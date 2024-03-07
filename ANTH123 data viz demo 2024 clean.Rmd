@@ -266,7 +266,8 @@ ggplot(vol_coords) +
   scale_size(range = c(1, 10)) + # add guide = none after!
   # scale_size(range = c(1, 10), guide = "none") + # add guide = none after!
   theme_bw() +
-  scale_color_continuous()
+  scale_color_continuous() +
+  facet_wrap(~major_rock_1, ncol = 2) # divides plots by another column (best for categorical variables)
 
 # some more cool formatting options
 ggplot() +
